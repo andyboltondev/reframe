@@ -89,7 +89,7 @@ pnpm desktop:build    # produce a release build + installers for this platform
 
 | Platform | Artefacts |
 | --- | --- |
-| macOS | `Reframe.app`, `Reframe_0.1.0_<arch>.dmg` |
+| macOS | `Reframe.app`, `Reframe_0.1.0_aarch64.dmg` |
 | Windows | `Reframe_0.1.0_x64-setup.exe` (NSIS), `Reframe_0.1.0_x64_en-US.msi` |
 
 Builds are per-architecture. On an Apple Silicon Mac, add

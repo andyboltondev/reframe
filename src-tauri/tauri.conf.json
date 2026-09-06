@@ -34,7 +34,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "category": "Graphics",
+    "category": "Graphics and Design",
     "shortDescription": "Convert. Resize. Optimise.",
     "longDescription": "Reframe is a batch image converter and resizer. Every image is processed on your own machine — nothing is uploaded.",
     "macOS": {
