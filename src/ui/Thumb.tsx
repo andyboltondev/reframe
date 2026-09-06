@@ -6,7 +6,7 @@ import type { Job } from '../core/types'
  * once a job completes so the batch visibly progresses. Object URLs are
  * revoked on unmount to keep large batches from pinning memory.
  */
-export default function Thumb({ job, enabled }: { job: Job; enabled: boolean }) {
+export default function Thumb({ job, enabled, large }: { job: Job; enabled: boolean; large?: boolean }) {
   const blob = job.result?.blob ?? job.file
   const [url, setUrl] = useState<string>()
 
@@ -17,9 +17,10 @@ export default function Thumb({ job, enabled }: { job: Job; enabled: boolean }) 
     return () => { URL.revokeObjectURL(u); setUrl(undefined) }
   }, [blob, enabled])
 
-  if (!enabled) return <span className="thumb thumb-off" aria-hidden="true" />
+  const cls = `thumb${large ? ' thumb-lg' : ''}`
+  if (!enabled) return <span className={`${cls} thumb-off`} aria-hidden="true" />
   return (
-    <span className="thumb" aria-hidden="true">
+    <span className={cls} aria-hidden="true">
       {url && <img src={url} alt="" loading="lazy" decoding="async" />}
     </span>
   )

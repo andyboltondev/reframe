@@ -15,11 +15,14 @@ import WelcomeModal from './WelcomeModal'
 import ThemeToggle, { type Theme } from './ThemeToggle'
 import { describeSettings } from './describe'
 import {
-  describeWriteError, folderSaveAvailable, pickFolder, restoreFolder,
+  defaultFolder, describeWriteError, folderSaveAvailable, pickFolder, restoreFolder,
   type FolderSink, type RememberedFolder,
 } from '../platform/folder'
 
 type Phase = 'idle' | 'running' | 'paused' | 'done'
+
+const SIDEBAR_MIN = 260
+const SIDEBAR_MAX = 520
 
 interface Prefs {
   theme: Theme
@@ -45,6 +48,30 @@ export default function App() {
     welcomeShown: false,
   })
   const [showWelcome, setShowWelcome] = useState(!prefs.welcomeShown)
+
+  const [sidebarWidth, setSidebarWidth] = usePersisted<number>('reframe.sidebarWidth', 320)
+  const [liveSidebarWidth, setLiveSidebarWidth] = useState<number | null>(null)
+  const dragWidth = useRef<number | null>(null)
+
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startWidth + (startX - ev.clientX)))
+      dragWidth.current = next
+      setLiveSidebarWidth(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      if (dragWidth.current != null) setSidebarWidth(dragWidth.current)
+      dragWidth.current = null
+      setLiveSidebarWidth(null)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [sidebarWidth, setSidebarWidth])
 
   const [dragging, setDragging] = useState(false)
 
@@ -122,8 +149,10 @@ export default function App() {
 
   /** Get a writable folder ready before a batch starts — reusing the one
    *  already open this session, restoring the remembered one if it still
-   *  exists, or asking the user to pick (or create) one. Not needed when
-   *  exporting as an archive. */
+   *  exists, silently resolving a sensible default (desktop only), or
+   *  asking the user to pick (or create) one. Every batch writes into a
+   *  folder — individually, or as a single archive — so this always runs
+   *  when folder access is available at all. */
   const ensureExportFolder = useCallback(async (): Promise<boolean> => {
     if (folderSinkRef.current) return true
 
@@ -133,7 +162,15 @@ export default function App() {
         folderSinkRef.current = restored.sink
         return true
       }
+    } else {
+      const fallback = await defaultFolder()
+      if (fallback?.ok) {
+        folderSinkRef.current = fallback.sink
+        setPrefs({ ...prefs, exportDir: fallback.remember })
+        return true
+      }
     }
+
     const picked = await pickFolder()
     if (!picked.ok) {
       if (picked.reason !== 'cancelled') {
@@ -152,8 +189,7 @@ export default function App() {
   const convert = async () => {
     if (!sources.length) return
 
-    const useZip = prefs.exportAsZip || !canWriteFolder
-    if (!useZip) {
+    if (canWriteFolder) {
       setPreparing(true)
       const ready = await ensureExportFolder()
       setPreparing(false)
@@ -241,27 +277,31 @@ export default function App() {
     const done = list.filter((j) => j.result)
     if (!done.length) return
 
-    const useZip = prefs.exportAsZip || !canWriteFolder
-    if (useZip) {
+    const sink = folderSinkRef.current
+    // With no folder available at all, there's nowhere to put individual
+    // files — always bundle those cases, regardless of the stored toggle.
+    const asZip = prefs.exportAsZip || !sink
+
+    if (asZip) {
       try {
         const ext = prefs.zipFormat === 'gz' ? 'tar.gz' : 'zip'
+        const filename = `reframe-output.${ext}`
         setSaveState({ kind: 'busy', message: `Packaging ${done.length} image${done.length === 1 ? '' : 's'}…` })
         const zip = await buildZip(done.map((j) => ({ path: j.result!.outPath, blob: j.result!.blob })))
-        saveLocally(zip, `reframe-output.${ext}`)
-        setSaveState({ kind: 'ok', message: `Exported ${done.length} image${done.length === 1 ? '' : 's'} as ${ext.toUpperCase()}.` })
+        if (sink) {
+          await sink.write(filename, zip)
+          setSaveState({ kind: 'ok', message: `Saved ${filename} to ${sink.name}.` })
+        } else {
+          saveLocally(zip, filename)
+          setSaveState({ kind: 'ok', message: `Exported ${done.length} image${done.length === 1 ? '' : 's'} as ${ext.toUpperCase()}.` })
+        }
       } catch (e) {
         setSaveState({ kind: 'error', message: `Failed to create archive: ${String(e)}` })
       }
       return
     }
 
-    const sink = folderSinkRef.current
-    if (!sink) {
-      // Shouldn't happen — ensureExportFolder runs before every batch — but
-      // fail visibly rather than silently dropping the finished files.
-      setSaveState({ kind: 'error', message: 'No export folder is ready. Click Convert again to choose one.' })
-      return
-    }
+    if (!sink) return // unreachable — asZip is always true when sink is null
 
     setSaveState({ kind: 'busy', message: `Saving ${done.length} image${done.length === 1 ? '' : 's'} to ${sink.name}…` })
 
@@ -289,7 +329,7 @@ export default function App() {
           }
         : { kind: 'ok', message: `Saved ${written} ${written === 1 ? 'file' : 'files'} to ${sink.name}.` },
     )
-  }, [list, prefs.exportAsZip, prefs.zipFormat, canWriteFolder])
+  }, [list, prefs.exportAsZip, prefs.zipFormat])
 
   useEffect(() => {
     document.documentElement.dataset.theme = prefs.theme
@@ -392,7 +432,27 @@ export default function App() {
           )}
         </section>
 
-        <aside className="pane-settings" aria-label="Settings">
+        <div
+          className="resize-handle"
+          onMouseDown={startResize}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+        />
+
+        <aside
+          className="pane-settings"
+          aria-label="Settings"
+          style={{ width: liveSidebarWidth ?? sidebarWidth }}
+        >
+          <SettingsPanel
+            settings={settings}
+            onChange={setSettings}
+            recursive={prefs.recursive}
+            preservePaths={prefs.preservePaths}
+            onPrefs={(p) => setPrefs({ ...prefs, ...p })}
+            disabled={busy}
+          />
           <ExportPanel
             preservePaths={prefs.preservePaths}
             onPrefs={(p) => setPrefs({ ...prefs, ...p })}
@@ -401,14 +461,6 @@ export default function App() {
             zipFormat={prefs.zipFormat}
             onExport={handleExportPrefs}
             canWriteFolder={canWriteFolder}
-            disabled={busy}
-          />
-          <SettingsPanel
-            settings={settings}
-            onChange={setSettings}
-            recursive={prefs.recursive}
-            preservePaths={prefs.preservePaths}
-            onPrefs={(p) => setPrefs({ ...prefs, ...p })}
             disabled={busy}
           />
         </aside>
@@ -485,9 +537,10 @@ export default function App() {
 
       {showWelcome && (
         <WelcomeModal
+          initialDontShowAgain={prefs.welcomeShown}
           onClose={(dontShowAgain) => {
             setShowWelcome(false)
-            if (dontShowAgain) setPrefs({ ...prefs, welcomeShown: true })
+            setPrefs({ ...prefs, welcomeShown: dontShowAgain })
           }}
         />
       )}

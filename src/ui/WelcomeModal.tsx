@@ -3,10 +3,12 @@ import { useState } from 'react'
 interface Props {
   /** `dontShowAgain` is true when the user checked the box before dismissing. */
   onClose(dontShowAgain: boolean): void
+  /** Reflects the current persisted preference, so reopening via Help shows accurate state. */
+  initialDontShowAgain: boolean
 }
 
-export default function WelcomeModal({ onClose }: Props) {
-  const [dontShowAgain, setDontShowAgain] = useState(false)
+export default function WelcomeModal({ onClose, initialDontShowAgain }: Props) {
+  const [dontShowAgain, setDontShowAgain] = useState(initialDontShowAgain)
 
   return (
     <div className="modal-overlay">
@@ -29,9 +31,12 @@ export default function WelcomeModal({ onClose }: Props) {
             </ul>
           </section>
 
-          <section className="welcome-section privacy">
-            <div className="privacy-badge">
-              <span className="dot" aria-hidden="true" />
+          <section className="welcome-section privacy-callout">
+            <div className="privacy-badge" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="5" y="11" width="14" height="9" rx="2" />
+                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
             </div>
             <h3>Privacy</h3>
             <p>

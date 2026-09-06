@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { Job } from '../core/types'
 import { bytes } from '../core/format'
+import { usePersisted } from './usePersisted'
 import Thumb from './Thumb'
 
 interface Props {
@@ -22,12 +23,14 @@ const LABEL: Record<Job['status'], string> = {
 }
 
 type SortKey = 'order' | 'name' | 'size'
+type ViewMode = 'list' | 'grid'
 
 export default function FileList({
   jobs, ignored, thumbnails, onThumbnails, onDrop, onRemove, onClear,
 }: Props) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SortKey>('order')
+  const [view, setView] = usePersisted<ViewMode>('reframe.fileView', 'list')
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -70,40 +73,85 @@ export default function FileList({
             />
             <span>Previews</span>
           </label>
+          <div className="segmented" role="group" aria-label="View">
+            <button
+              className={view === 'list' ? 'on' : ''}
+              aria-pressed={view === 'list'}
+              title="List view"
+              onClick={() => setView('list')}
+            >
+              <span aria-hidden="true">☰</span>
+              <span className="seg-label">List</span>
+            </button>
+            <button
+              className={view === 'grid' ? 'on' : ''}
+              aria-pressed={view === 'grid'}
+              title="Grid view"
+              onClick={() => setView('grid')}
+            >
+              <span aria-hidden="true">⊞</span>
+              <span className="seg-label">Grid</span>
+            </button>
+          </div>
           <button onClick={onClear}>Clear</button>
         </div>
       </div>
 
-      <ul className="rows">
-        {rows.map((j) => (
-          <li key={j.id} className={`row status-${j.status}`}>
-            <Thumb job={j} enabled={thumbnails} />
-            <span className="name" title={j.relPath}>{j.relPath}</span>
-            <span className="meta">
-              {j.result ? (
-                <>
-                  {j.result.width}×{j.result.height}
-                  <span className="sizes">
-                    {bytes(j.inBytes)} <span aria-hidden="true">→</span>{' '}
-                    <strong>{bytes(j.result.bytes)}</strong>
-                  </span>
-                </>
-              ) : (
-                bytes(j.inBytes)
-              )}
-            </span>
-            <span className={`pill pill-${j.status}`}>
-              {j.status === 'processing' && <span className="spinner" aria-hidden="true" />}
-              {LABEL[j.status]}
-            </span>
-            <button className="link" onClick={() => onRemove(j.id)}>
-              <span className="sr-only">Remove {j.name}</span>
-              <span aria-hidden="true">✕</span>
-            </button>
-            {j.message && <span className="msg">{j.message}</span>}
-          </li>
-        ))}
-      </ul>
+      {view === 'list' ? (
+        <ul className="rows">
+          {rows.map((j) => (
+            <li key={j.id} className={`row status-${j.status}`}>
+              <Thumb job={j} enabled={thumbnails} />
+              <span className="name" title={j.relPath}>{j.relPath}</span>
+              <span className="meta">
+                {j.result ? (
+                  <>
+                    {j.result.width}×{j.result.height}
+                    <span className="sizes">
+                      {bytes(j.inBytes)} <span aria-hidden="true">→</span>{' '}
+                      <strong>{bytes(j.result.bytes)}</strong>
+                    </span>
+                  </>
+                ) : (
+                  bytes(j.inBytes)
+                )}
+              </span>
+              <span className={`pill pill-${j.status}`}>
+                {j.status === 'processing' && <span className="spinner" aria-hidden="true" />}
+                {LABEL[j.status]}
+              </span>
+              <button className="link" onClick={() => onRemove(j.id)}>
+                <span className="sr-only">Remove {j.name}</span>
+                <span aria-hidden="true">✕</span>
+              </button>
+              {j.message && <span className="msg">{j.message}</span>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ul className="grid-rows">
+          {rows.map((j) => (
+            <li key={j.id} className={`grid-item status-${j.status}`} title={j.relPath}>
+              <div className="grid-thumb-wrap">
+                <Thumb job={j} enabled={thumbnails} large />
+                <span className={`pill pill-${j.status} grid-pill`}>
+                  {j.status === 'processing' && <span className="spinner" aria-hidden="true" />}
+                  {LABEL[j.status]}
+                </span>
+                <button className="grid-remove" onClick={() => onRemove(j.id)} title="Remove">
+                  <span className="sr-only">Remove {j.name}</span>
+                  <span aria-hidden="true">✕</span>
+                </button>
+              </div>
+              <span className="grid-name">{j.name}</span>
+              <span className="grid-meta">
+                {j.result ? bytes(j.result.bytes) : bytes(j.inBytes)}
+              </span>
+              {j.message && <span className="grid-msg">{j.message}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {rows.length === 0 && <p className="muted empty">No images match this filter.</p>}
       <p className="muted drop-more">Drag more images or folders here to add them.</p>

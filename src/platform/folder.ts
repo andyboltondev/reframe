@@ -104,6 +104,30 @@ async function pickNative(): Promise<PickResult> {
   return { ok: true, sink: tauriSink(root, name), remember: { kind: 'tauri', path: root, name } }
 }
 
+/**
+ * Silently resolve (and create if needed) a sensible default export folder —
+ * `Pictures/reframe`, falling back to `Desktop/reframe` — without showing a
+ * dialog. Desktop-only: the browser has no equivalent unprompted access.
+ */
+async function defaultNative(): Promise<PickResult | null> {
+  const { path } = await tauriModules()
+  let base: string | null = null
+  try { base = await path.pictureDir() } catch { /* not available on this OS */ }
+  if (!base) {
+    try { base = await path.desktopDir() } catch { /* not available on this OS */ }
+  }
+  if (!base) return null
+
+  try {
+    const root = await path.join(base, 'reframe')
+    const { fs } = await tauriModules()
+    await fs.mkdir(root, { recursive: true })
+    return { ok: true, sink: tauriSink(root, 'reframe'), remember: { kind: 'tauri', path: root, name: 'reframe' } }
+  } catch {
+    return null
+  }
+}
+
 async function restoreNative(saved: { path: string; name: string }): Promise<RestoreResult> {
   try {
     const { fs } = await tauriModules()
@@ -265,6 +289,11 @@ export async function pickFolder(): Promise<PickResult> {
     reason: 'unavailable',
     detail: 'this browser cannot write directly to folders',
   }
+}
+
+/** Try to silently get (creating if needed) a sensible default folder — desktop-only. */
+export async function defaultFolder(): Promise<PickResult | null> {
+  return isTauri() ? defaultNative() : null
 }
 
 /** Reopen a previously-picked folder without showing a picker, if still possible. */

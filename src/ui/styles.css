@@ -92,18 +92,38 @@ button, input, select { font: inherit; color: inherit; }
 /* --------------------------------------------------------------- body --- */
 
 .body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  display: flex;
   min-height: 0;
 }
 
 @media (max-width: 820px) {
-  .body { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .body { flex-direction: column; }
+  .resize-handle { display: none; }
+  .pane-settings { width: 100% !important; flex: 1 1 auto; }
 }
 
-.pane-list { min-height: 0; padding: 16px; overflow: auto; }
+.pane-list { flex: 1 1 auto; min-width: 0; padding: 16px; overflow: auto; }
+
+.resize-handle {
+  flex: 0 0 7px;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+  background: var(--border);
+}
+
+.resize-handle:hover::after, .resize-handle.active::after {
+  left: 2px; width: 3px; border-radius: 2px;
+  background: var(--accent);
+}
 
 .pane-settings {
+  flex: 0 0 auto;
   border-left: 1px solid var(--border);
   background: var(--surface);
   overflow: auto;
@@ -314,6 +334,9 @@ button.link {
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb-off { width: 6px; height: 6px; border-radius: 999px; border: none; }
 
+.thumb-lg { width: 100%; aspect-ratio: 1; border-radius: 8px; }
+.thumb-lg.thumb-off { width: 100%; aspect-ratio: 1; border-radius: 8px; border: 1px solid var(--border); }
+
 .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .row .meta {
@@ -352,6 +375,50 @@ button.link {
 
 .empty { padding: 18px 16px; text-align: center; }
 .drop-more { margin: 0; padding: 10px 16px 14px; font-size: 12px; }
+
+/* -------------------------------------------------------- grid view --- */
+
+.grid-rows {
+  list-style: none; margin: 0; padding: 12px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.grid-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.grid-thumb-wrap { position: relative; }
+
+.grid-item.status-processing .thumb-lg { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -1px; }
+.grid-item.status-failed .thumb-lg { outline: 2px solid color-mix(in srgb, var(--err) 55%, transparent); outline-offset: -1px; }
+
+.grid-pill {
+  position: absolute; left: 4px; bottom: 4px;
+  padding: 2px 6px; font-size: 10px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.grid-remove {
+  position: absolute; top: 4px; right: 4px;
+  width: 20px; height: 20px; padding: 0;
+  display: grid; place-items: center;
+  border-radius: 50%; font-size: 11px; line-height: 1;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  border: 1px solid var(--border);
+  opacity: 0; transition: opacity .12s;
+}
+
+.grid-item:hover .grid-remove, .grid-remove:focus-visible { opacity: 1; }
+
+.grid-name {
+  font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid-meta { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.grid-msg { font-size: 11px; color: var(--warn); }
+.grid-item.status-failed .grid-msg { color: var(--err); }
 
 .check.compact { font-size: 12px; color: var(--muted); }
 
@@ -692,19 +759,18 @@ button.small { padding: 4px 10px; font-size: 12px; }
 
 .welcome-section li { margin-bottom: 6px; line-height: 1.5; }
 
-.privacy { text-align: center; padding: 12px 14px; background: var(--surface-2); border-radius: 8px; }
+.privacy-callout { text-align: center; padding: 12px 14px; background: var(--surface-2); border-radius: 8px; }
 .privacy-badge {
   display: inline-flex;
   width: 32px; height: 32px;
-  background: var(--accent); border-radius: 50%;
+  background: var(--accent); color: var(--accent-text); border-radius: 50%;
   align-items: center; justify-content: center;
   margin: 0 auto 8px;
+  flex: none;
 }
 
-.privacy-badge .dot { width: 12px; height: 12px; background: var(--accent-text); }
-
-.privacy h3 { margin-top: 0; }
-.privacy p { margin: 8px 0 0; font-size: 13px; line-height: 1.5; }
+.privacy-callout h3 { margin-top: 0; }
+.privacy-callout p { margin: 8px 0 0; font-size: 13px; line-height: 1.5; }
 
 .modal-footer {
   display: flex; align-items: center; justify-content: space-between;
