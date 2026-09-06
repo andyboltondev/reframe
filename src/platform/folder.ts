@@ -128,6 +128,16 @@ async function defaultNative(): Promise<PickResult | null> {
   }
 }
 
+async function createNative(saved: { path: string; name: string }): Promise<RestoreResult> {
+  try {
+    const { fs } = await tauriModules()
+    await fs.mkdir(saved.path, { recursive: true })
+  } catch {
+    return { ok: false, reason: 'missing' }
+  }
+  return { ok: true, sink: tauriSink(saved.path, saved.name) }
+}
+
 async function restoreNative(saved: { path: string; name: string }): Promise<RestoreResult> {
   try {
     const { fs } = await tauriModules()
@@ -294,6 +304,27 @@ export async function pickFolder(): Promise<PickResult> {
 /** Try to silently get (creating if needed) a sensible default folder — desktop-only. */
 export async function defaultFolder(): Promise<PickResult | null> {
   return isTauri() ? defaultNative() : null
+}
+
+/** Check whether a remembered folder still exists, without creating anything
+ *  or showing a picker. Only meaningful for desktop (Tauri) folders; browser
+ *  handles can't be probed this cheaply, so they report `true`. */
+export async function folderExists(saved: RememberedFolder): Promise<boolean> {
+  if (saved?.kind !== 'tauri' || !isTauri()) return true
+  try {
+    const { fs } = await tauriModules()
+    return await fs.exists(saved.path)
+  } catch {
+    return false
+  }
+}
+
+/** Create a remembered folder (and any missing parents) that has gone away,
+ *  then open it for writing. Desktop-only. */
+export async function createFolder(saved: RememberedFolder): Promise<RestoreResult> {
+  return saved?.kind === 'tauri' && isTauri()
+    ? createNative(saved)
+    : { ok: false, reason: 'unsupported' }
 }
 
 /** Reopen a previously-picked folder without showing a picker, if still possible. */

@@ -12,11 +12,12 @@ import Dropzone from './Dropzone'
 import ProgressPanel from './ProgressPanel'
 import Summary from './Summary'
 import WelcomeModal from './WelcomeModal'
+import Modal from './Modal'
 import ThemeToggle, { type Theme } from './ThemeToggle'
 import { describeSettings } from './describe'
 import {
-  defaultFolder, describeWriteError, folderSaveAvailable, pickFolder, restoreFolder,
-  type FolderSink, type RememberedFolder,
+  createFolder, defaultFolder, describeWriteError, folderExists, folderSaveAvailable,
+  pickFolder, restoreFolder, type FolderSink, type RememberedFolder,
 } from '../platform/folder'
 
 type Phase = 'idle' | 'running' | 'paused' | 'done'
@@ -90,6 +91,26 @@ export default function App() {
   const folderSinkRef = useRef<FolderSink | null>(null)
   const exportedForRun = useRef(false)
 
+  // When a batch starts but the remembered export folder has been deleted or
+  // moved, we ask the user what to do rather than silently picking a new one.
+  const [missingDir, setMissingDir] = useState<RememberedFolder | null>(null)
+  const missingDirChoice = useRef<((c: 'create' | 'change' | 'cancel') => void) | null>(null)
+
+  const askMissingDir = useCallback(
+    (dir: RememberedFolder) =>
+      new Promise<'create' | 'change' | 'cancel'>((resolve) => {
+        missingDirChoice.current = resolve
+        setMissingDir(dir)
+      }),
+    [],
+  )
+
+  const answerMissingDir = useCallback((choice: 'create' | 'change' | 'cancel') => {
+    setMissingDir(null)
+    missingDirChoice.current?.(choice)
+    missingDirChoice.current = null
+  }, [])
+
   const canWriteFolder = folderSaveAvailable()
 
   const list = useMemo(() => sources.map((s) => jobs[s.id]).filter(Boolean), [sources, jobs])
@@ -157,10 +178,28 @@ export default function App() {
     if (folderSinkRef.current) return true
 
     if (prefs.exportDir) {
-      const restored = await restoreFolder(prefs.exportDir)
-      if (restored.ok) {
-        folderSinkRef.current = restored.sink
-        return true
+      if (!(await folderExists(prefs.exportDir))) {
+        const choice = await askMissingDir(prefs.exportDir)
+        if (choice === 'cancel') return false
+        if (choice === 'create') {
+          const created = await createFolder(prefs.exportDir)
+          if (created.ok) {
+            folderSinkRef.current = created.sink
+            return true
+          }
+          setSaveState({
+            kind: 'error',
+            message: `Could not create “${prefs.exportDir.name}”. Choose a different folder.`,
+          })
+          // fall through to the picker
+        }
+        // 'change' (or a failed 'create') falls through to pickFolder below
+      } else {
+        const restored = await restoreFolder(prefs.exportDir)
+        if (restored.ok) {
+          folderSinkRef.current = restored.sink
+          return true
+        }
       }
     } else {
       const fallback = await defaultFolder()
@@ -184,7 +223,7 @@ export default function App() {
     folderSinkRef.current = picked.sink
     setPrefs({ ...prefs, exportDir: picked.remember })
     return true
-  }, [prefs, setPrefs])
+  }, [prefs, setPrefs, askMissingDir])
 
   const convert = async () => {
     if (!sources.length) return
@@ -533,6 +572,22 @@ export default function App() {
         <div className="drag-overlay" aria-hidden="true">
           <div>Drop to add images</div>
         </div>
+      )}
+
+      {missingDir && (
+        <Modal title="Export folder not found" onClose={() => answerMissingDir('cancel')}>
+          <p>
+            The export folder “{missingDir.name}” no longer exists. It may have
+            been moved, renamed, or deleted.
+          </p>
+          <div className="modal-actions">
+            <button onClick={() => answerMissingDir('cancel')}>Cancel</button>
+            <button onClick={() => answerMissingDir('change')}>Choose another…</button>
+            <button className="primary" onClick={() => answerMissingDir('create')}>
+              Create it
+            </button>
+          </div>
+        </Modal>
       )}
 
       {showWelcome && (

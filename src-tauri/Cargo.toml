@@ -1,6 +1,6 @@
 [package]
 name = "reframe"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reframe — convert, resize and optimise images locally"
 authors = ["Reframe"]
 edition = "2021"
