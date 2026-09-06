@@ -92,15 +92,21 @@ pnpm desktop:build    # produce a release build + installers for this platform
 | macOS | `Reframe.app`, `Reframe_0.1.0_aarch64.dmg` |
 | Windows | `Reframe_0.1.0_x64-setup.exe` (NSIS), `Reframe_0.1.0_x64_en-US.msi` |
 
-Builds are per-architecture. On an Apple Silicon Mac, add
+`desktop:build` only ever produces artefacts **for the machine it runs on**.
+There is no supported way to build the Windows installers from macOS or the
+macOS bundles from Windows: each needs the host's own linker, SDK and installer
+tooling (MSVC and NSIS/WiX on Windows, Xcode's toolchain and `hdiutil` on
+macOS). Use the CI workflow below for the platform you are not on.
+
+Builds are also per-architecture. On an Apple Silicon Mac, add
 `--target x86_64-apple-darwin` (after `rustup target add x86_64-apple-darwin`)
 for an Intel build, or `--target universal-apple-darwin` for a universal binary.
 
 ### Cross-platform builds in CI
 
-You cannot build a macOS app on Windows or vice versa, so
-[`.github/workflows/desktop.yml`](.github/workflows/desktop.yml) builds both on
-their own runners. It runs on `workflow_dispatch`, and pushing a `v*` tag also
+Since neither host can build for the other,
+[`.github/workflows/desktop.yml`](.github/workflows/desktop.yml) builds each on
+its own runner — macOS arm64, macOS x64 and Windows x64. It runs on `workflow_dispatch`, and pushing a `v*` tag also
 collects the installers into a **draft** GitHub release.
 
 ### Signing
