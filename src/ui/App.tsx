@@ -12,6 +12,7 @@ import ProgressPanel from './ProgressPanel'
 import Summary from './Summary'
 import ThemeToggle, { type Theme } from './ThemeToggle'
 import { describeSettings } from './describe'
+import { describeWriteError, folderSaveAvailable, pickFolder } from '../platform/folder'
 
 type Phase = 'idle' | 'running' | 'paused' | 'done'
 
@@ -191,98 +192,33 @@ export default function App() {
   }
 
   const saveToFolder = async () => {
-    if (!('showDirectoryPicker' in window)) {
-      setSaveState({
-        kind: 'error',
-        message: 'This browser cannot write directly to folders. Export as ZIP instead.',
-      })
-      return
-    }
-
     const done = list.filter((j) => j.result)
     setSaveState({ kind: 'busy', message: 'Waiting for the folder picker…' })
 
-    // Some embedded browsers and webviews expose showDirectoryPicker but never
-    // present a dialog, leaving the promise pending forever. Say so rather
-    // than looking broken; if the picker does arrive late we carry on.
-    let settled = false
-    const nudge = setTimeout(() => {
-      if (!settled) {
-        setSaveState({
-          kind: 'error',
-          message:
-            'The folder picker did not open — this browser or window does not allow it. Export as ZIP instead.',
-        })
-      }
-    }, 4000)
-
-    let root: FileSystemDirectoryHandle
-    try {
-      root = await (window as unknown as {
-        showDirectoryPicker(o?: { mode?: string }): Promise<FileSystemDirectoryHandle>
-      }).showDirectoryPicker({ mode: 'readwrite' })
-      settled = true
-      clearTimeout(nudge)
-    } catch (e) {
-      settled = true
-      clearTimeout(nudge)
-      const name = e instanceof DOMException ? e.name : ''
-      if (name === 'AbortError') { setSaveState({ kind: 'idle' }); return }
+    const picked = await pickFolder()
+    if (!picked.ok) {
+      if (picked.reason === 'cancelled') { setSaveState({ kind: 'idle' }); return }
       setSaveState({
         kind: 'error',
-        message:
-          name === 'SecurityError'
-            ? 'Your browser blocked the folder picker. Export as ZIP instead.'
-            : 'The folder could not be opened. Export as ZIP instead.',
+        message: `${picked.detail[0].toUpperCase()}${picked.detail.slice(1)}. Export as ZIP instead.`,
       })
       return
     }
+    const sink = picked.sink
 
-    // Choosing a folder does not by itself grant write access — Chrome asks
-    // separately, and without this the first write fails with NotAllowedError.
-    const perm = root as unknown as {
-      queryPermission?(o: { mode: string }): Promise<PermissionState>
-      requestPermission?(o: { mode: string }): Promise<PermissionState>
-    }
-    try {
-      let state = (await perm.queryPermission?.({ mode: 'readwrite' })) ?? 'granted'
-      if (state === 'prompt') state = (await perm.requestPermission?.({ mode: 'readwrite' })) ?? 'granted'
-      if (state !== 'granted') {
-        setSaveState({
-          kind: 'error',
-          message: `Reframe was not given permission to write to “${root.name}”. Allow editing when your browser asks, or export as ZIP.`,
-        })
-        return
-      }
-    } catch {
-      // Older implementations lack the permission API; fall through and try.
-    }
-
-    setSaveState({ kind: 'busy', message: `Saving ${done.length} files to ${root.name}…` })
+    setSaveState({ kind: 'busy', message: `Saving ${done.length} files to ${sink.name}…` })
 
     let written = 0
     const failures: string[] = []
     let firstError = ''
     for (const j of done) {
       try {
-        const parts = j.result!.outPath.split('/')
-        let dir = root
-        for (const seg of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(seg, { create: true })
-        const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true })
-        const ws = await fh.createWritable()
-        await ws.write(j.result!.blob)
-        await ws.close()
+        await sink.write(j.result!.outPath, j.result!.blob)
         written++
       } catch (e) {
         failures.push(j.result!.outPath)
         // Keep the real reason — a generic message makes this impossible to fix.
-        if (!firstError) {
-          firstError = e instanceof DOMException
-            ? e.name === 'NotAllowedError'
-              ? 'permission to write was refused'
-              : `${e.name}: ${e.message}`
-            : String(e)
-        }
+        if (!firstError) firstError = describeWriteError(e)
       }
     }
 
@@ -292,10 +228,10 @@ export default function App() {
             kind: 'error',
             message:
               written === 0
-                ? `Could not write to “${root.name}” — ${firstError}. Export as ZIP instead.`
-                : `Saved ${written} of ${done.length} files to ${root.name}. ${failures.length} failed — ${firstError}.`,
+                ? `Could not write to “${sink.name}” — ${firstError}. Export as ZIP instead.`
+                : `Saved ${written} of ${done.length} files to ${sink.name}. ${failures.length} failed — ${firstError}.`,
           }
-        : { kind: 'ok', message: `Saved ${written} ${written === 1 ? 'file' : 'files'} to ${root.name}.` },
+        : { kind: 'ok', message: `Saved ${written} ${written === 1 ? 'file' : 'files'} to ${sink.name}.` },
     )
   }
 
@@ -308,7 +244,7 @@ export default function App() {
   const rate = elapsed > 250 ? finished / (elapsed / 1000) : 0
   const stale = phase === 'done' && ranWith !== null && ranWith !== JSON.stringify(settings)
   const recap = describeSettings(settings)
-  const canWriteFolder = 'showDirectoryPicker' in window
+  const canWriteFolder = folderSaveAvailable()
 
   return (
     <div

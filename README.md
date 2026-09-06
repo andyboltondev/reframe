@@ -10,6 +10,9 @@ pnpm dev      # http://localhost:5199
 pnpm build
 ```
 
+Native desktop builds for **Windows and macOS** are wired up via Tauri 2 — see
+[Desktop builds](#desktop-builds).
+
 ## What works today
 
 - Drag-and-drop of files **and folders** (recursive, `webkitGetAsEntry` walk),
@@ -54,9 +57,77 @@ pnpm build
   running, final saved-bytes and reduction, plus a chip recap of exactly what
   Convert will do (format, quality, resize mode, trim, worker count).
 
+## Desktop builds
+
+The desktop shell is [Tauri 2](https://tauri.app): the same React frontend runs
+inside the operating system's own webview (WKWebView on macOS, WebView2 on
+Windows), so there is one codebase and the binaries stay small. Everything still
+happens locally — the shell adds no network access.
+
+### One-time setup
+
+Install the Rust toolchain (this is the only extra prerequisite):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Platform prerequisites:
+
+- **macOS** — Xcode Command Line Tools (`xcode-select --install`).
+- **Windows** — the Microsoft C++ Build Tools (MSVC v143 + the Windows SDK) and
+  the WebView2 runtime, which is already present on Windows 10 21H2 and later.
+
+### Commands
+
+```bash
+pnpm desktop:dev      # run the app in a native window with hot reload
+pnpm desktop:build    # produce a release build + installers for this platform
+```
+
+`desktop:build` writes to `src-tauri/target/release/bundle/`:
+
+| Platform | Artefacts |
+| --- | --- |
+| macOS | `Reframe.app`, `Reframe_0.1.0_<arch>.dmg` |
+| Windows | `Reframe_0.1.0_x64-setup.exe` (NSIS), `Reframe_0.1.0_x64_en-US.msi` |
+
+Builds are per-architecture. On an Apple Silicon Mac, add
+`--target x86_64-apple-darwin` (after `rustup target add x86_64-apple-darwin`)
+for an Intel build, or `--target universal-apple-darwin` for a universal binary.
+
+### Cross-platform builds in CI
+
+You cannot build a macOS app on Windows or vice versa, so
+[`.github/workflows/desktop.yml`](.github/workflows/desktop.yml) builds both on
+their own runners. It runs on `workflow_dispatch`, and pushing a `v*` tag also
+collects the installers into a **draft** GitHub release.
+
+### Signing
+
+Unsigned builds run, but macOS shows a Gatekeeper warning and Windows shows a
+SmartScreen prompt. To sign, add the certificates as repository secrets and the
+matching environment variables to the workflow — `APPLE_CERTIFICATE`,
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
+`APPLE_PASSWORD` and `APPLE_TEAM_ID` for macOS notarisation, and
+`WINDOWS_CERTIFICATE` / `WINDOWS_CERTIFICATE_PASSWORD` for Windows Authenticode.
+No certificates are configured yet.
+
+### Saving to a folder
+
+**Save to folder…** works in both builds, through one interface in
+[`src/platform/folder.ts`](src/platform/folder.ts). In a browser it uses the
+File System Access API; in the desktop shell it uses Tauri's native folder
+dialog and filesystem plugins, because macOS's webview does not implement that
+API. Output paths are checked for traversal before anything is written, and a
+failure on one file reports the real underlying reason without stopping the
+rest.
+
 ## Layout
 
 ```
+src-tauri/      the Tauri 2 desktop shell (Rust)
+src/platform/   host-specific backends (native vs. browser folder saving)
 src/core/       platform-independent logic
   types.ts      settings + job model
   pipeline.ts   geometry, trim detection, saliency  (pure, portable to Rust)
@@ -80,4 +151,4 @@ back a Tauri/Rust implementation later; only `process.worker.ts` touches canvas.
   detected at runtime and reported as a clear per-image error where missing.
 - Not yet built: before/after preview with interactive crop, "never crop
   detected subject", replace-originals mode, thumbnails, custom presets,
-  filename templates, and the Tauri desktop shell.
+  and filename templates.
