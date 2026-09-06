@@ -45,7 +45,15 @@ async function pickNative(): Promise<PickResult> {
 
   let root: string | null
   try {
-    root = await open({ directory: true, multiple: false, title: 'Save images to…' })
+    // `recursive` is what extends the filesystem scope to subdirectories of
+    // the chosen folder. Without it the plugin allows direct children only,
+    // and writing a batch that preserves relative paths is denied.
+    root = await open({
+      directory: true,
+      multiple: false,
+      recursive: true,
+      title: 'Save images to…',
+    })
   } catch (e) {
     return { ok: false, reason: 'failed', detail: String(e) }
   }
