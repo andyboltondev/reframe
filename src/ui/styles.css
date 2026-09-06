@@ -334,8 +334,19 @@ button.link {
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb-off { width: 6px; height: 6px; border-radius: 999px; border: none; }
 
-.thumb-lg { width: 100%; aspect-ratio: 1; border-radius: 8px; }
-.thumb-lg.thumb-off { width: 100%; aspect-ratio: 1; border-radius: 8px; border: 1px solid var(--border); }
+/* Grid thumbnail: a fixed square that shows the whole image inside it,
+   letterboxed as needed, rather than cropping to fill like the tiny row
+   thumbnails. The image is taken out of flow so its intrinsic (often
+   portrait) size can't stretch the square past `aspect-ratio: 1`. */
+.thumb-lg {
+  display: block; position: relative;
+  width: 100%; height: auto; aspect-ratio: 1; border-radius: 8px;
+}
+.thumb-lg img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: contain;
+}
+.thumb-lg.thumb-off { border: 1px solid var(--border); }
 
 .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
