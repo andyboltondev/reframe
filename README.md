@@ -18,7 +18,8 @@ Native desktop builds for **Windows and macOS** are wired up via Tauri 2 — see
 - Drag-and-drop of files **and folders** (recursive, `webkitGetAsEntry` walk),
   plus file/folder pickers. Unsupported files are counted and ignored.
 - Output formats: JPEG, PNG, WebP, AVIF, or *Keep Original*, with a quality
-  slider and the Maximum/High/Balanced/Small presets.
+  slider and the Maximum/High/Balanced/Small presets. **Every format works on
+  every platform** — see [Encoding](#encoding).
 - Resize modes: longest side, width & height, width only, height only,
   percentage; optional enlargement (off by default).
 - Fit: contain, cover/crop, pad, stretch. Crop anchors including a **smart**
@@ -56,6 +57,44 @@ Native desktop builds for **Windows and macOS** are wired up via Tauri 2 — see
 - A detailed status bar: counts and total size, live throughput in img/s while
   running, final saved-bytes and reduction, plus a chip recap of exactly what
   Convert will do (format, quality, resize mode, trim, worker count).
+
+- **Installable and offline.** The web app is a PWA: install it from the
+  browser and it runs with no network at all. See [Offline and
+  updates](#offline-and-updates).
+
+## Encoding
+
+Canvas encoding support is uneven across engines. WKWebView — Safari, and so
+the macOS desktop build — encodes neither WebP nor AVIF, and no browser
+encodes AVIF dependably. Relying on `convertToBlob` alone meant those formats
+failed outright on macOS.
+
+[`src/core/encode.ts`](src/core/encode.ts) tries the native encoder first,
+because where it exists it is much faster, and verifies the result: a browser
+that cannot honour the requested type silently returns PNG instead, which
+counts as a failure. When native encoding is unavailable it falls back to the
+libwebp and libavif builds from `@jsquash/webp` and `@jsquash/avif`, which
+behave identically everywhere.
+
+The single-threaded WebAssembly builds are selected deliberately. The
+multi-threaded AVIF encoder needs cross-origin isolation, which neither GitHub
+Pages nor the Tauri shell provides. WebP picks its SIMD build when the engine
+supports it. The `.wasm` binaries are imported as URLs so Vite emits them as
+real, base-path-correct assets, and they are only downloaded when a fallback
+actually happens.
+
+## Offline and updates
+
+The web build is a progressive web app. The whole bundle — including the
+WebAssembly codecs — is precached, so an installed Reframe converts images
+with no network at all. That matches what the app already promised: nothing
+was ever uploaded, and now nothing needs to be downloaded either.
+
+Updates are silent. A new deployment is fetched in the background and takes
+over the next time the app is opened, rather than being forced onto a page
+that may be mid-batch; a long-lived tab re-checks hourly. Registration lives
+in [`src/platform/registerSW.ts`](src/platform/registerSW.ts) and is skipped
+inside the desktop shell, which ships updates through its installer instead.
 
 ## Desktop builds
 
@@ -152,14 +191,32 @@ a few minutes; later builds reuse `src-tauri/target` and take seconds.
 
 ```bash
 pnpm desktop:dev      # run the app in a native window with hot reload
-pnpm desktop:build    # produce a release build + installers for this platform
+pnpm desktop:build    # release build + installers for this platform and CPU
 ```
 
-`desktop:build` writes to `src-tauri/target/release/bundle/`:
+On macOS there are three explicit targets:
 
-| Platform | Artefacts |
+```bash
+pnpm desktop:build:intel           # x86_64-apple-darwin
+pnpm desktop:build:apple-silicon   # aarch64-apple-darwin
+pnpm desktop:build:universal       # both, in one binary — what CI ships
+```
+
+Each needs its Rust target installed once:
+
+```bash
+rustup target add x86_64-apple-darwin aarch64-apple-darwin
+```
+
+Output lands in `src-tauri/target/<target>/release/bundle/` for the three
+macOS commands above, and in `src-tauri/target/release/bundle/` for a plain
+`desktop:build`:
+
+| Build | Artefacts |
 | --- | --- |
-| macOS | `Reframe.app`, `Reframe_0.1.0_aarch64.dmg` |
+| macOS universal | `Reframe.app`, `Reframe_0.1.0_universal.dmg` |
+| macOS Apple Silicon | `Reframe.app`, `Reframe_0.1.0_aarch64.dmg` |
+| macOS Intel | `Reframe.app`, `Reframe_0.1.0_x64.dmg` |
 | Windows | `Reframe_0.1.0_x64-setup.exe` (NSIS), `Reframe_0.1.0_x64_en-US.msi` |
 
 `desktop:build` only ever produces artefacts **for the machine it runs on**.
@@ -168,16 +225,18 @@ macOS bundles from Windows: each needs the host's own linker, SDK and installer
 tooling (MSVC and NSIS/WiX on Windows, Xcode's toolchain and `hdiutil` on
 macOS). Use the CI workflow below for the platform you are not on.
 
-Builds are also per-architecture. On an Apple Silicon Mac, add
-`--target x86_64-apple-darwin` (after `rustup target add x86_64-apple-darwin`)
-for an Intel build, or `--target universal-apple-darwin` for a universal binary.
+A plain `desktop:build` targets only the CPU it runs on. The macOS commands
+above cross the architecture boundary — but not the platform one.
 
 ### Cross-platform builds in CI
 
 Since neither host can build for the other,
 [`.github/workflows/desktop.yml`](.github/workflows/desktop.yml) builds each on
-its own runner — macOS arm64, macOS x64 and Windows x64. It runs on `workflow_dispatch`, and pushing a `v*` tag also
-collects the installers into a published GitHub release.
+its own runner: **macOS universal** and **Windows x64**. Shipping one universal
+DMG rather than separate Apple Silicon and Intel downloads means nobody has to
+know which Mac they own. It runs on `workflow_dispatch`, and pushing a `v*` tag
+also collects the installers into a published GitHub release as
+`Reframe_<version>_macOS-Universal.dmg` and `Reframe_<version>_x64.msi`.
 
 ### Signing
 
@@ -203,13 +262,14 @@ rest.
 
 ```
 src-tauri/      the Tauri 2 desktop shell (Rust)
-src/platform/   host-specific backends (native vs. browser folder saving)
+src/platform/   host-specific backends (folder saving, service worker)
 src/core/       platform-independent logic
   types.ts      settings + job model
   pipeline.ts   geometry, trim detection, saliency  (pure, portable to Rust)
   pool.ts       worker pool / scheduler
   intake.ts     file + directory intake, output paths, collision handling
   zip.ts        store-only ZIP writer
+  encode.ts     native canvas encoder + WebAssembly WebP/AVIF fallback
 src/workers/    the processing worker (OffscreenCanvas)
 src/ui/         React interface
 ```
@@ -219,12 +279,14 @@ back a Tauri/Rust implementation later; only `process.worker.ts` touches canvas.
 
 ## Known gaps vs. the specification
 
-- Encoding uses the browser's canvas encoders, so *Optimise file size* is not
-  yet a distinct step, and metadata handling is limited to what canvas does
-  (it strips everything and applies EXIF orientation on decode). A WASM
-  encoder layer is the next step for real optimisation and metadata options.
-- TIFF/BMP/HEIC input depends on browser codec support; AVIF encoding is
-  detected at runtime and reported as a clear per-image error where missing.
+- *Optimise file size* is not yet a distinct step. WebP and AVIF now go
+  through WebAssembly encoders where the canvas cannot help, but that layer is
+  used only as a fallback; driving it directly would open up real
+  quality/size search and metadata options.
+- Metadata handling is limited to what canvas does: it strips everything and
+  applies EXIF orientation on decode.
+- *Decoding* still depends on the engine, so TIFF/BMP/HEIC input varies by
+  platform and is reported as a clear per-image error where unsupported.
 - Not yet built: before/after preview with interactive crop, "never crop
   detected subject", replace-originals mode, thumbnails, custom presets,
   and filename templates.

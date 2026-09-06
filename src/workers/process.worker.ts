@@ -1,8 +1,9 @@
 /// <reference lib="webworker" />
 import {
-  anchorPoint, extFor, focalPoint, formatFromMime, mimeFor, placement,
+  anchorPoint, extFor, focalPoint, formatFromMime, placement,
   supportsAlpha, targetSize, trimBox,
 } from '../core/pipeline'
+import { encodeCanvas } from '../core/encode'
 import type { WorkerRequest, WorkerResponse } from '../core/types'
 
 /** Longest side of the scratch buffer used for trim / saliency analysis. */
@@ -130,13 +131,15 @@ async function run(req: WorkerRequest): Promise<WorkerResponse> {
     const quality = s.quality / 100
     let blob: Blob
     try {
-      blob = await c.convertToBlob({ type: mimeFor(outFormat), quality })
-    } catch {
-      return { id, ok: false, error: `This browser cannot encode ${outFormat.toUpperCase()} images.` }
-    }
-    // Some browsers silently fall back to PNG for unsupported types.
-    if (blob.type !== mimeFor(outFormat)) {
-      return { id, ok: false, error: `This browser cannot encode ${outFormat.toUpperCase()} images.` }
+      blob = await encodeCanvas(c, outFormat, quality)
+    } catch (e) {
+      return {
+        id,
+        ok: false,
+        error: e instanceof Error && e.message
+          ? e.message
+          : `Could not encode this image as ${outFormat.toUpperCase()}.`,
+      }
     }
 
     return {

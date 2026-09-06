@@ -25,16 +25,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # One universal binary covers both Apple Silicon and Intel Macs, so
+          # there is a single macOS download rather than an architecture choice.
           - platform: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: apple-silicon
-            args: --target aarch64-apple-darwin
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: intel
-            args: --target x86_64-apple-darwin
+            target: universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            artifact_name: macos-universal
+            args: --target universal-apple-darwin
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
             artifact_name: windows-x64
             args: ''
 
@@ -57,7 +57,8 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          # A universal build is linked from the two real rustup targets.
+          targets: ${{ matrix.rust_targets }}
 
       - name: Restore Rust cache
         uses: swatinem/rust-cache@v2
@@ -115,8 +116,7 @@ jobs:
             mv "${matches[0]}" "release-artifacts/$destination"
           }
 
-          rename_one 'Reframe_*_aarch64.dmg' "Reframe_${version}_Apple-Silicon.dmg"
-          rename_one 'Reframe_*_x64.dmg' "Reframe_${version}_Intel.dmg"
+          rename_one 'Reframe_*_universal.dmg' "Reframe_${version}_macOS-Universal.dmg"
           rename_one 'Reframe_*_x64_en-US.msi' "Reframe_${version}_x64.msi"
 
       - name: Publish GitHub release
