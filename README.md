@@ -177,7 +177,7 @@ for an Intel build, or `--target universal-apple-darwin` for a universal binary.
 Since neither host can build for the other,
 [`.github/workflows/desktop.yml`](.github/workflows/desktop.yml) builds each on
 its own runner — macOS arm64, macOS x64 and Windows x64. It runs on `workflow_dispatch`, and pushing a `v*` tag also
-collects the installers into a **draft** GitHub release.
+collects the installers into a published GitHub release.
 
 ### Signing
 
