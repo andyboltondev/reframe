@@ -64,19 +64,89 @@ inside the operating system's own webview (WKWebView on macOS, WebView2 on
 Windows), so there is one codebase and the binaries stay small. Everything still
 happens locally — the shell adds no network access.
 
-### One-time setup
+### Setting up the toolchain
 
-Install the Rust toolchain (this is the only extra prerequisite):
+Building the web app needs only Node and pnpm. The desktop shell additionally
+needs Rust and your platform's native compiler and linker — Tauri compiles a
+real binary rather than packaging a browser. Both sets of steps below are
+one-time.
+
+#### macOS
+
+1. **Xcode Command Line Tools** — provides `clang`, the linker and the macOS
+   SDK. Skip if you already have full Xcode installed.
+
+   ```bash
+   xcode-select --install
+   ```
+
+2. **Rust**, via rustup. Accept the default (stable) toolchain.
+
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+
+   > **If `cargo` is not found in a new terminal**, rustup added its `PATH` line
+   > to `~/.profile`, which zsh — the default macOS shell — never reads. Either
+   > run `source ~/.cargo/env` for the current shell, or add that same line to
+   > `~/.zshenv` to make it stick.
+
+3. **Verify** before building anything:
+
+   ```bash
+   cargo --version && xcodebuild -version
+   ```
+
+Nothing else is required: the webview (WKWebView) and the DMG tooling
+(`hdiutil`) both ship with macOS.
+
+#### Windows
+
+1. **Microsoft C++ Build Tools** — Tauri links with MSVC, so this is required
+   even though you write no C++. Install the *Desktop development with C++*
+   workload, which includes the MSVC v143 toolset and the Windows SDK. Either
+   run the standalone
+   [Build Tools installer](https://visualstudio.microsoft.com/visual-cpp-build-tools/),
+   or install Visual Studio with that workload ticked, or use winget:
+
+   ```powershell
+   winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+   ```
+
+2. **Rust**, via [rustup-init.exe](https://rustup.rs) or winget. Choose the
+   default `x86_64-pc-windows-msvc` toolchain — **not** the GNU one, which
+   Tauri does not support.
+
+   ```powershell
+   winget install --id Rustlang.Rustup
+   ```
+
+   Close and reopen your terminal afterwards so the new `PATH` is picked up.
+
+3. **WebView2 runtime** — already present on Windows 10 21H2 and later, and on
+   all of Windows 11. On anything older, install the
+   [Evergreen Bootstrapper](https://developer.microsoft.com/microsoft-edge/webview2/).
+
+4. **Verify** in a fresh terminal:
+
+   ```powershell
+   cargo --version
+   rustc -vV        # the "host:" line should end in -msvc
+   ```
+
+The NSIS and WiX toolchains that produce the installers are downloaded by Tauri
+on the first `desktop:build`, so there is nothing to install for those.
+
+#### Both platforms
+
+Install the JavaScript dependencies once, from the repository root:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+pnpm install
 ```
 
-Platform prerequisites:
-
-- **macOS** — Xcode Command Line Tools (`xcode-select --install`).
-- **Windows** — the Microsoft C++ Build Tools (MSVC v143 + the Windows SDK) and
-  the WebView2 runtime, which is already present on Windows 10 21H2 and later.
+The first `pnpm desktop:build` compiles the whole Rust dependency tree and takes
+a few minutes; later builds reuse `src-tauri/target` and take seconds.
 
 ### Commands
 
