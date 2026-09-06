@@ -27,12 +27,15 @@ jobs:
         include:
           - platform: macos-latest
             target: aarch64-apple-darwin
+            artifact_name: apple-silicon
             args: --target aarch64-apple-darwin
           - platform: macos-latest
             target: x86_64-apple-darwin
+            artifact_name: intel
             args: --target x86_64-apple-darwin
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            artifact_name: windows-x64
             args: ''
 
     runs-on: ${{ matrix.platform }}
@@ -73,7 +76,7 @@ jobs:
       - name: Upload desktop installers
         uses: actions/upload-artifact@v7
         with:
-          name: reframe-${{ matrix.target }}
+          name: reframe-${{ matrix.artifact_name }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.exe
@@ -90,6 +93,31 @@ jobs:
         with:
           path: release-artifacts
           merge-multiple: true
+
+      - name: Give installers friendly names
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+
+          rename_one() {
+            pattern="$1"
+            destination="$2"
+            mapfile -t matches < <(find release-artifacts -type f -name "$pattern")
+
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "::error::Expected exactly one file matching $pattern, found ${#matches[@]}"
+              exit 1
+            fi
+
+            mv "${matches[0]}" "release-artifacts/$destination"
+          }
+
+          rename_one 'Reframe_*_aarch64.dmg' "Reframe_${version}_Apple-Silicon.dmg"
+          rename_one 'Reframe_*_x64.dmg' "Reframe_${version}_Intel.dmg"
+          rename_one 'Reframe_*_x64_en-US.msi' "Reframe_${version}_x64.msi"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
