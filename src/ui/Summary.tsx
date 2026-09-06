@@ -5,15 +5,12 @@ import { bytes, duration } from '../core/format'
 interface Props {
   jobs: Job[]
   elapsed: number
-  canWriteFolder: boolean
-  onExport(): void
-  onSaveToFolder(): void
   onRestart(): void
   save: { kind: 'idle' | 'busy' | 'ok' | 'error'; message?: string }
 }
 
 export default function Summary({
-  jobs, elapsed, canWriteFolder, onExport, onSaveToFolder, onRestart, save,
+  jobs, elapsed, onRestart, save,
 }: Props) {
   const [showErrors, setShowErrors] = useState(false)
   const failed = jobs.filter((j) => j.status === 'failed')
@@ -34,15 +31,7 @@ export default function Summary({
           </p>
         </div>
         <div className="summary-actions">
-          <button onClick={onRestart}>Start another batch</button>
-          {canWriteFolder && (
-            <button onClick={onSaveToFolder} disabled={save.kind === 'busy' || !ok.length}>
-              Save to folder…
-            </button>
-          )}
-          <button className="primary" onClick={onExport} disabled={!ok.length}>
-            {ok.length > 1 ? 'Export as ZIP' : 'Export image'}
-          </button>
+          <button className="primary" onClick={onRestart}>Start another batch</button>
         </div>
       </div>
 
@@ -54,9 +43,7 @@ export default function Summary({
       )}
 
       <p className="muted export-hint">
-        {canWriteFolder
-          ? 'Save to folder writes straight to a folder you choose. Export as ZIP hands the file to your browser. Nothing is uploaded.'
-          : 'Export hands the file to your browser. Nothing is uploaded.'}
+        Images are being saved to your export folder. Nothing is uploaded anywhere.
       </p>
 
       <dl className="stats">

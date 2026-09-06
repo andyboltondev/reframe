@@ -6,10 +6,12 @@ import { buildZip } from '../core/zip'
 import { bytes, duration } from '../core/format'
 import { usePersisted } from './usePersisted'
 import SettingsPanel from './SettingsPanel'
+import ExportPanel from './ExportPanel'
 import FileList from './FileList'
 import Dropzone from './Dropzone'
 import ProgressPanel from './ProgressPanel'
 import Summary from './Summary'
+import WelcomeModal from './WelcomeModal'
 import ThemeToggle, { type Theme } from './ThemeToggle'
 import { describeSettings } from './describe'
 import { describeWriteError, folderSaveAvailable, pickFolder } from '../platform/folder'
@@ -21,13 +23,25 @@ interface Prefs {
   recursive: boolean
   preservePaths: boolean
   thumbnails: boolean
+  exportDir: string | null
+  exportAsZip: boolean
+  zipFormat: 'zip' | 'gz'
+  welcomeShown: boolean
 }
 
 export default function App() {
   const [settings, setSettings] = usePersisted<Settings>('reframe.settings', defaultSettings)
   const [prefs, setPrefs] = usePersisted<Prefs>('reframe.prefs', {
-    theme: 'system', recursive: true, preservePaths: true, thumbnails: true,
+    theme: 'system',
+    recursive: true,
+    preservePaths: true,
+    thumbnails: true,
+    exportDir: null,
+    exportAsZip: false,
+    zipFormat: 'zip',
+    welcomeShown: !!localStorage.getItem('reframe.welcomeShown'),
   })
+  const [showWelcome, setShowWelcome] = useState(!prefs.welcomeShown)
 
   const [dragging, setDragging] = useState(false)
 
@@ -42,16 +56,6 @@ export default function App() {
   const poolRef = useRef<WorkerPool | null>(null)
   const startedAt = useRef(0)
   const taken = useRef(new Set<string>())
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = prefs.theme
-  }, [prefs.theme])
-
-  useEffect(() => {
-    if (phase !== 'running') return
-    const t = setInterval(() => setElapsed(Date.now() - startedAt.current), 500)
-    return () => clearInterval(t)
-  }, [phase])
 
   const list = useMemo(() => sources.map((s) => jobs[s.id]).filter(Boolean), [sources, jobs])
   const counts = useMemo(() => {
@@ -177,6 +181,82 @@ export default function App() {
     else if (phase === 'paused') { poolRef.current?.resume(); setPhase('running') }
   }
 
+  const handleExportPrefs = (dir: string | null, asZip: boolean, format: 'zip' | 'gz') => {
+    setPrefs({ ...prefs, exportDir: dir, exportAsZip: asZip, zipFormat: format })
+  }
+
+  const autoExportFiles = useCallback(async () => {
+    const done = list.filter((j) => j.result)
+    if (!done.length || !prefs.exportDir) return
+
+    setSaveState({ kind: 'busy', message: `Saving ${done.length} image${done.length === 1 ? '' : 's'}…` })
+
+    if (prefs.exportAsZip) {
+      try {
+        const ext = prefs.zipFormat === 'gz' ? 'tar.gz' : 'zip'
+        const zip = await buildZip(done.map((j) => ({ path: j.result!.outPath, blob: j.result!.blob })))
+        saveLocally(zip, `reframe-output.${ext}`)
+        setSaveState({ kind: 'ok', message: `Exported ${done.length} images as ${ext.toUpperCase()}.` })
+      } catch (e) {
+        setSaveState({ kind: 'error', message: `Failed to create archive: ${String(e)}` })
+      }
+    } else {
+      setSaveState({ kind: 'busy', message: `Exporting ${done.length} image${done.length === 1 ? '' : 's'} to ${prefs.exportDir}…` })
+      const picked = await pickFolder()
+      if (!picked.ok) {
+        if (picked.reason === 'cancelled') { setSaveState({ kind: 'idle' }); return }
+        setSaveState({
+          kind: 'error',
+          message: `${picked.detail[0].toUpperCase()}${picked.detail.slice(1)}.`,
+        })
+        return
+      }
+      const sink = picked.sink
+
+      let written = 0
+      const failures: string[] = []
+      let firstError = ''
+
+      for (const j of done) {
+        try {
+          await sink.write(j.result!.outPath, j.result!.blob)
+          written++
+        } catch (e) {
+          failures.push(j.result!.outPath)
+          if (!firstError) firstError = describeWriteError(e)
+        }
+      }
+
+      setSaveState(
+        failures.length
+          ? {
+              kind: 'error',
+              message:
+                written === 0
+                  ? `Could not write to “${sink.name}” — ${firstError}.`
+                  : `Saved ${written} of ${done.length} files to ${sink.name}. ${failures.length} failed.`,
+            }
+          : { kind: 'ok', message: `Saved ${written} ${written === 1 ? 'file' : 'files'} to ${sink.name}.` },
+      )
+    }
+  }, [list, prefs])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = prefs.theme
+  }, [prefs.theme])
+
+  useEffect(() => {
+    if (phase !== 'running') return
+    const t = setInterval(() => setElapsed(Date.now() - startedAt.current), 500)
+    return () => clearInterval(t)
+  }, [phase])
+
+  useEffect(() => {
+    if (phase === 'done' && prefs.exportDir) {
+      void autoExportFiles()
+    }
+  }, [phase, prefs.exportDir, autoExportFiles])
+
   const exportFiles = async () => {
     const done = list.filter((j) => j.result)
     if (!done.length) return
@@ -189,50 +269,6 @@ export default function App() {
     const zip = await buildZip(done.map((j) => ({ path: j.result!.outPath, blob: j.result!.blob })))
     saveLocally(zip, 'reframe-output.zip')
     setSaveState({ kind: 'ok', message: `Exported ${done.length} images as reframe-output.zip.` })
-  }
-
-  const saveToFolder = async () => {
-    const done = list.filter((j) => j.result)
-    setSaveState({ kind: 'busy', message: 'Waiting for the folder picker…' })
-
-    const picked = await pickFolder()
-    if (!picked.ok) {
-      if (picked.reason === 'cancelled') { setSaveState({ kind: 'idle' }); return }
-      setSaveState({
-        kind: 'error',
-        message: `${picked.detail[0].toUpperCase()}${picked.detail.slice(1)}. Export as ZIP instead.`,
-      })
-      return
-    }
-    const sink = picked.sink
-
-    setSaveState({ kind: 'busy', message: `Saving ${done.length} files to ${sink.name}…` })
-
-    let written = 0
-    const failures: string[] = []
-    let firstError = ''
-    for (const j of done) {
-      try {
-        await sink.write(j.result!.outPath, j.result!.blob)
-        written++
-      } catch (e) {
-        failures.push(j.result!.outPath)
-        // Keep the real reason — a generic message makes this impossible to fix.
-        if (!firstError) firstError = describeWriteError(e)
-      }
-    }
-
-    setSaveState(
-      failures.length
-        ? {
-            kind: 'error',
-            message:
-              written === 0
-                ? `Could not write to “${sink.name}” — ${firstError}. Export as ZIP instead.`
-                : `Saved ${written} of ${done.length} files to ${sink.name}. ${failures.length} failed — ${firstError}.`,
-          }
-        : { kind: 'ok', message: `Saved ${written} ${written === 1 ? 'file' : 'files'} to ${sink.name}.` },
-    )
   }
 
   const inTotal = list.reduce((n, j) => n + j.inBytes, 0)
@@ -259,6 +295,14 @@ export default function App() {
           <p>Convert. Resize. Optimise.</p>
         </div>
         <div className="topbar-actions">
+          <button
+            className="icon-button"
+            onClick={() => setShowWelcome(true)}
+            title="Help & features"
+            aria-label="Help"
+          >
+            ?
+          </button>
           <span className="privacy">
             <span className="dot" aria-hidden="true" />
             Your images never leave your device
@@ -289,9 +333,6 @@ export default function App() {
             <Summary
               jobs={list}
               elapsed={elapsed}
-              canWriteFolder={canWriteFolder}
-              onExport={() => void exportFiles()}
-              onSaveToFolder={() => void saveToFolder()}
               onRestart={clearAll}
               save={saveState}
             />
@@ -313,6 +354,15 @@ export default function App() {
         </section>
 
         <aside className="pane-settings" aria-label="Settings">
+          <ExportPanel
+            preservePaths={prefs.preservePaths}
+            onPrefs={(p) => setPrefs({ ...prefs, ...p })}
+            exportDir={prefs.exportDir}
+            exportAsZip={prefs.exportAsZip}
+            zipFormat={prefs.zipFormat}
+            onExport={handleExportPrefs}
+            disabled={busy}
+          />
           <SettingsPanel
             settings={settings}
             onChange={setSettings}
@@ -392,6 +442,8 @@ export default function App() {
           <div>Drop to add images</div>
         </div>
       )}
+
+      {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
     </div>
   )
 }

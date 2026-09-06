@@ -617,3 +617,117 @@ button.danger {
 
 .field > span:first-child { display: inline-flex; align-items: center; }
 .check span { display: inline-flex; align-items: center; }
+
+/* ------------------------------------------------------- export panel --- */
+
+.export-panel section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+
+.export-folder-group { display: flex; flex-direction: column; gap: 8px; }
+
+.export-folder-display {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 8px; border-radius: 6px; background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.folder-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-size: 13px;
+}
+
+button.secondary { background: var(--surface); border: 1px solid var(--border); }
+button.secondary:hover:not(:disabled) { border-color: var(--muted); }
+button.small { padding: 4px 10px; font-size: 12px; }
+
+.export-note { margin: 0; font-size: 12px; color: var(--muted); }
+
+/* ------------------------------------------------------- welcome modal --- */
+
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 20;
+  display: grid; place-items: center;
+  background: rgb(0 0 0 / .45);
+  padding: 20px;
+}
+
+.welcome-modal {
+  width: min(520px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / .3);
+  display: flex; flex-direction: column;
+  max-height: 85vh;
+}
+
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 18px; border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 { margin: 0; font-size: 18px; font-weight: 600; }
+
+.modal-close {
+  width: 28px; height: 28px; padding: 0;
+  display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 6px; font-size: 16px; color: var(--muted);
+  cursor: pointer; flex: none;
+}
+
+.modal-close:hover { border-color: var(--muted); color: var(--text); }
+
+.modal-content {
+  flex: 1; overflow-y: auto;
+  padding: 18px;
+}
+
+.welcome-section { margin-bottom: 16px; }
+.welcome-section:last-child { margin-bottom: 0; }
+
+.welcome-section h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+
+.welcome-section ul, .welcome-section ol {
+  margin: 0; padding-left: 20px; font-size: 13px;
+}
+
+.welcome-section li { margin-bottom: 6px; line-height: 1.5; }
+
+.privacy { text-align: center; padding: 12px 14px; background: var(--surface-2); border-radius: 8px; }
+.privacy-badge {
+  display: inline-flex;
+  width: 32px; height: 32px;
+  background: var(--accent); border-radius: 50%;
+  align-items: center; justify-content: center;
+  margin: 0 auto 8px;
+}
+
+.privacy-badge .dot { width: 12px; height: 12px; background: var(--accent-text); }
+
+.privacy h3 { margin-top: 0; }
+.privacy p { margin: 8px 0 0; font-size: 13px; line-height: 1.5; }
+
+.modal-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.modal-footer .check { margin: 0; }
+.modal-footer .check input { accent-color: var(--accent); }
+.modal-footer .check span { font-size: 13px; }
+
+.modal-footer button { flex: 1; }
+
+/* ----------------------------------------------- icon button --- */
+
+.icon-button {
+  width: 28px; height: 28px; padding: 0;
+  display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 6px; font-size: 14px; font-weight: 600;
+  color: var(--muted); cursor: pointer;
+  flex: none;
+}
+
+.icon-button:hover { border-color: var(--muted); color: var(--text); }
+.icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
