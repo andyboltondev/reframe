@@ -42,10 +42,6 @@ export default function Summary({
         </p>
       )}
 
-      <p className="muted export-hint">
-        Images are being saved to your export folder. Nothing is uploaded anywhere.
-      </p>
-
       <dl className="stats">
         <div><dt>Original size</dt><dd>{bytes(inBytes)}</dd></div>
         <div><dt>New size</dt><dd>{bytes(outBytes)}</dd></div>

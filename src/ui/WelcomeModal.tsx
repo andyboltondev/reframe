@@ -1,19 +1,19 @@
+import { useState } from 'react'
+
 interface Props {
-  onClose(): void
+  /** `dontShowAgain` is true when the user checked the box before dismissing. */
+  onClose(dontShowAgain: boolean): void
 }
 
 export default function WelcomeModal({ onClose }: Props) {
-  const handleDontShowAgain = () => {
-    localStorage.setItem('reframe.welcomeShown', 'true')
-    onClose()
-  }
+  const [dontShowAgain, setDontShowAgain] = useState(false)
 
   return (
     <div className="modal-overlay">
       <div className="modal welcome-modal">
         <div className="modal-header">
           <h2>Welcome to Reframe</h2>
-          <button className="modal-close" onClick={onClose} aria-label="Close" title="Close">
+          <button className="modal-close" onClick={() => onClose(dontShowAgain)} aria-label="Close" title="Close">
             ✕
           </button>
         </div>
@@ -63,13 +63,12 @@ export default function WelcomeModal({ onClose }: Props) {
           <label className="check">
             <input
               type="checkbox"
-              onChange={(e) => {
-                if (e.target.checked) handleDontShowAgain()
-              }}
+              checked={dontShowAgain}
+              onChange={(e) => setDontShowAgain(e.target.checked)}
             />
             <span>Don't show again</span>
           </label>
-          <button className="primary" onClick={onClose}>
+          <button className="primary" onClick={() => onClose(dontShowAgain)}>
             Get started
           </button>
         </div>

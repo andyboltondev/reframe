@@ -14,7 +14,10 @@ import Summary from './Summary'
 import WelcomeModal from './WelcomeModal'
 import ThemeToggle, { type Theme } from './ThemeToggle'
 import { describeSettings } from './describe'
-import { describeWriteError, folderSaveAvailable, pickFolder } from '../platform/folder'
+import {
+  describeWriteError, folderSaveAvailable, pickFolder, restoreFolder,
+  type FolderSink, type RememberedFolder,
+} from '../platform/folder'
 
 type Phase = 'idle' | 'running' | 'paused' | 'done'
 
@@ -23,7 +26,7 @@ interface Prefs {
   recursive: boolean
   preservePaths: boolean
   thumbnails: boolean
-  exportDir: string | null
+  exportDir: RememberedFolder | null
   exportAsZip: boolean
   zipFormat: 'zip' | 'gz'
   welcomeShown: boolean
@@ -37,9 +40,9 @@ export default function App() {
     preservePaths: true,
     thumbnails: true,
     exportDir: null,
-    exportAsZip: false,
+    exportAsZip: true,
     zipFormat: 'zip',
-    welcomeShown: !!localStorage.getItem('reframe.welcomeShown'),
+    welcomeShown: false,
   })
   const [showWelcome, setShowWelcome] = useState(!prefs.welcomeShown)
 
@@ -49,6 +52,7 @@ export default function App() {
   const [jobs, setJobs] = useState<Record<string, Job>>({})
   const [ignored, setIgnored] = useState(0)
   const [phase, setPhase] = useState<Phase>('idle')
+  const [preparing, setPreparing] = useState(false)
   const [elapsed, setElapsed] = useState(0)
 
   const [ranWith, setRanWith] = useState<string | null>(null)
@@ -56,6 +60,10 @@ export default function App() {
   const poolRef = useRef<WorkerPool | null>(null)
   const startedAt = useRef(0)
   const taken = useRef(new Set<string>())
+  const folderSinkRef = useRef<FolderSink | null>(null)
+  const exportedForRun = useRef(false)
+
+  const canWriteFolder = folderSaveAvailable()
 
   const list = useMemo(() => sources.map((s) => jobs[s.id]).filter(Boolean), [sources, jobs])
   const counts = useMemo(() => {
@@ -112,8 +120,47 @@ export default function App() {
     setJobs((j) => { const n = { ...j }; delete n[id]; return n })
   }
 
-  const convert = () => {
+  /** Get a writable folder ready before a batch starts — reusing the one
+   *  already open this session, restoring the remembered one if it still
+   *  exists, or asking the user to pick (or create) one. Not needed when
+   *  exporting as an archive. */
+  const ensureExportFolder = useCallback(async (): Promise<boolean> => {
+    if (folderSinkRef.current) return true
+
+    if (prefs.exportDir) {
+      const restored = await restoreFolder(prefs.exportDir)
+      if (restored.ok) {
+        folderSinkRef.current = restored.sink
+        return true
+      }
+    }
+    const picked = await pickFolder()
+    if (!picked.ok) {
+      if (picked.reason !== 'cancelled') {
+        setSaveState({
+          kind: 'error',
+          message: `${picked.detail[0].toUpperCase()}${picked.detail.slice(1)}.`,
+        })
+      }
+      return false
+    }
+    folderSinkRef.current = picked.sink
+    setPrefs({ ...prefs, exportDir: picked.remember })
+    return true
+  }, [prefs, setPrefs])
+
+  const convert = async () => {
     if (!sources.length) return
+
+    const useZip = prefs.exportAsZip || !canWriteFolder
+    if (!useZip) {
+      setPreparing(true)
+      const ready = await ensureExportFolder()
+      setPreparing(false)
+      if (!ready) return
+    }
+
+    exportedForRun.current = false
     taken.current = new Set()
     setJobs((j) => {
       const n = { ...j }
@@ -181,65 +228,68 @@ export default function App() {
     else if (phase === 'paused') { poolRef.current?.resume(); setPhase('running') }
   }
 
-  const handleExportPrefs = (dir: string | null, asZip: boolean, format: 'zip' | 'gz') => {
+  const handleExportPrefs = (dir: RememberedFolder | null, asZip: boolean, format: 'zip' | 'gz') => {
+    // A genuinely new folder was picked (as opposed to just flipping the zip
+    // toggle) — drop the cached sink so the next batch reopens the new one
+    // instead of silently continuing to write into the old folder.
+    if (dir !== prefs.exportDir) folderSinkRef.current = null
     setPrefs({ ...prefs, exportDir: dir, exportAsZip: asZip, zipFormat: format })
   }
 
+  /** Runs exactly once per finished batch — see the guarded effect below. */
   const autoExportFiles = useCallback(async () => {
     const done = list.filter((j) => j.result)
-    if (!done.length || !prefs.exportDir) return
+    if (!done.length) return
 
-    setSaveState({ kind: 'busy', message: `Saving ${done.length} image${done.length === 1 ? '' : 's'}…` })
-
-    if (prefs.exportAsZip) {
+    const useZip = prefs.exportAsZip || !canWriteFolder
+    if (useZip) {
       try {
         const ext = prefs.zipFormat === 'gz' ? 'tar.gz' : 'zip'
+        setSaveState({ kind: 'busy', message: `Packaging ${done.length} image${done.length === 1 ? '' : 's'}…` })
         const zip = await buildZip(done.map((j) => ({ path: j.result!.outPath, blob: j.result!.blob })))
         saveLocally(zip, `reframe-output.${ext}`)
-        setSaveState({ kind: 'ok', message: `Exported ${done.length} images as ${ext.toUpperCase()}.` })
+        setSaveState({ kind: 'ok', message: `Exported ${done.length} image${done.length === 1 ? '' : 's'} as ${ext.toUpperCase()}.` })
       } catch (e) {
         setSaveState({ kind: 'error', message: `Failed to create archive: ${String(e)}` })
       }
-    } else {
-      setSaveState({ kind: 'busy', message: `Exporting ${done.length} image${done.length === 1 ? '' : 's'} to ${prefs.exportDir}…` })
-      const picked = await pickFolder()
-      if (!picked.ok) {
-        if (picked.reason === 'cancelled') { setSaveState({ kind: 'idle' }); return }
-        setSaveState({
-          kind: 'error',
-          message: `${picked.detail[0].toUpperCase()}${picked.detail.slice(1)}.`,
-        })
-        return
-      }
-      const sink = picked.sink
-
-      let written = 0
-      const failures: string[] = []
-      let firstError = ''
-
-      for (const j of done) {
-        try {
-          await sink.write(j.result!.outPath, j.result!.blob)
-          written++
-        } catch (e) {
-          failures.push(j.result!.outPath)
-          if (!firstError) firstError = describeWriteError(e)
-        }
-      }
-
-      setSaveState(
-        failures.length
-          ? {
-              kind: 'error',
-              message:
-                written === 0
-                  ? `Could not write to “${sink.name}” — ${firstError}.`
-                  : `Saved ${written} of ${done.length} files to ${sink.name}. ${failures.length} failed.`,
-            }
-          : { kind: 'ok', message: `Saved ${written} ${written === 1 ? 'file' : 'files'} to ${sink.name}.` },
-      )
+      return
     }
-  }, [list, prefs])
+
+    const sink = folderSinkRef.current
+    if (!sink) {
+      // Shouldn't happen — ensureExportFolder runs before every batch — but
+      // fail visibly rather than silently dropping the finished files.
+      setSaveState({ kind: 'error', message: 'No export folder is ready. Click Convert again to choose one.' })
+      return
+    }
+
+    setSaveState({ kind: 'busy', message: `Saving ${done.length} image${done.length === 1 ? '' : 's'} to ${sink.name}…` })
+
+    let written = 0
+    const failures: string[] = []
+    let firstError = ''
+    for (const j of done) {
+      try {
+        await sink.write(j.result!.outPath, j.result!.blob)
+        written++
+      } catch (e) {
+        failures.push(j.result!.outPath)
+        if (!firstError) firstError = describeWriteError(e)
+      }
+    }
+
+    setSaveState(
+      failures.length
+        ? {
+            kind: 'error',
+            message:
+              written === 0
+                ? `Could not write to “${sink.name}” — ${firstError}.`
+                : `Saved ${written} of ${done.length} files to ${sink.name}. ${failures.length} failed — ${firstError}.`,
+          }
+        : { kind: 'ok', message: `Saved ${written} ${written === 1 ? 'file' : 'files'} to ${sink.name}.` },
+    )
+  }, [list, prefs.exportAsZip, prefs.zipFormat, canWriteFolder])
 
   useEffect(() => {
     document.documentElement.dataset.theme = prefs.theme
@@ -252,24 +302,14 @@ export default function App() {
   }, [phase])
 
   useEffect(() => {
-    if (phase === 'done' && prefs.exportDir) {
+    // The `exportedForRun` guard keeps this to exactly one export per batch,
+    // even though `autoExportFiles`'s identity can change for unrelated
+    // reasons (e.g. a settings tweak) while the "done" screen is showing.
+    if (phase === 'done' && !exportedForRun.current) {
+      exportedForRun.current = true
       void autoExportFiles()
     }
-  }, [phase, prefs.exportDir, autoExportFiles])
-
-  const exportFiles = async () => {
-    const done = list.filter((j) => j.result)
-    if (!done.length) return
-    if (done.length === 1) {
-      saveLocally(done[0].result!.blob, done[0].result!.outName)
-      setSaveState({ kind: 'ok', message: `Exported ${done[0].result!.outName}.` })
-      return
-    }
-    setSaveState({ kind: 'busy', message: `Packaging ${done.length} images…` })
-    const zip = await buildZip(done.map((j) => ({ path: j.result!.outPath, blob: j.result!.blob })))
-    saveLocally(zip, 'reframe-output.zip')
-    setSaveState({ kind: 'ok', message: `Exported ${done.length} images as reframe-output.zip.` })
-  }
+  }, [phase, autoExportFiles])
 
   const inTotal = list.reduce((n, j) => n + j.inBytes, 0)
   const okJobs = list.filter((j) => j.result)
@@ -280,7 +320,6 @@ export default function App() {
   const rate = elapsed > 250 ? finished / (elapsed / 1000) : 0
   const stale = phase === 'done' && ranWith !== null && ranWith !== JSON.stringify(settings)
   const recap = describeSettings(settings)
-  const canWriteFolder = folderSaveAvailable()
 
   return (
     <div
@@ -361,6 +400,7 @@ export default function App() {
             exportAsZip={prefs.exportAsZip}
             zipFormat={prefs.zipFormat}
             onExport={handleExportPrefs}
+            canWriteFolder={canWriteFolder}
             disabled={busy}
           />
           <SettingsPanel
@@ -427,11 +467,11 @@ export default function App() {
           ) : (
             <button
               className={`primary big${stale ? ' pulse' : ''}`}
-              onClick={convert}
-              disabled={!counts.total}
+              onClick={() => void convert()}
+              disabled={!counts.total || preparing}
             >
-              {phase === 'done' ? 'Convert again' : 'Convert'}
-              {counts.total ? ` ${counts.total}` : ''}
+              {preparing ? 'Choosing folder…' : phase === 'done' ? 'Convert again' : 'Convert'}
+              {!preparing && counts.total ? ` ${counts.total}` : ''}
             </button>
           )}
         </div>
@@ -443,7 +483,14 @@ export default function App() {
         </div>
       )}
 
-      {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
+      {showWelcome && (
+        <WelcomeModal
+          onClose={(dontShowAgain) => {
+            setShowWelcome(false)
+            if (dontShowAgain) setPrefs({ ...prefs, welcomeShown: true })
+          }}
+        />
+      )}
     </div>
   )
 }
